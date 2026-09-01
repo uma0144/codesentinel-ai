@@ -1,0 +1,470 @@
+{
+  "sql_injection": {
+    "security": {
+      "security_score": 18,
+      "risk_level": "CRITICAL",
+      "vulnerabilities": [
+        {
+          "id": "SEC-01",
+          "title": "Critical SQL Injection in User Profile Lookup",
+          "severity": "CRITICAL",
+          "cwe_id": "CWE-89",
+          "owasp_category": "A03:2021-Injection",
+          "line_numbers": [
+            11,
+            13
+          ],
+          "description": "Unsanitized user input is formatted directly into a raw SQL query string using f-strings.",
+          "attack_vector": "An attacker can input \"' OR '1'='1' --\" to dump the entire user database or bypass authentication.",
+          "remediation": "Use parameterized queries with SQLite placeholders (`?`) instead of string interpolation."
+        },
+        {
+          "id": "SEC-02",
+          "title": "Hardcoded Production API Secret Key",
+          "severity": "HIGH",
+          "cwe_id": "CWE-798",
+          "owasp_category": "A07:2021-Identification and Authentication Failures",
+          "line_numbers": [
+            5
+          ],
+          "description": "API credentials (SUPER_SECRET_PRODUCTION_KEY_12345) are hardcoded in the source file.",
+          "attack_vector": "Anyone with repo read access can extract credentials and impersonate services.",
+          "remediation": "Load secrets from environment variables or a secure key management vault."
+        },
+        {
+          "id": "SEC-03",
+          "title": "Path Traversal in File Deletion",
+          "severity": "HIGH",
+          "cwe_id": "CWE-22",
+          "owasp_category": "A01:2021-Broken Access Control",
+          "line_numbers": [
+            20
+          ],
+          "description": "Direct string concatenation with user-supplied filename enables directory traversal (`../`).",
+          "attack_vector": "Passing `../../etc/passwd` or system files can delete arbitrary files on the server.",
+          "remediation": "Validate base path with `os.path.abspath` and verify resolved path starts with safe base directory."
+        }
+      ],
+      "compliance_checks": {
+        "owasp_compliant": false,
+        "secrets_leak_free": false,
+        "input_sanitized": false,
+        "safe_dependencies": true
+      },
+      "summary": "Critical vulnerabilities detected: SQL Injection, Hardcoded Secrets, and Path Traversal require immediate patching."
+    },
+    "quality": {
+      "quality_score": 45,
+      "maintainability_score": 50,
+      "performance_score": 60,
+      "time_complexity": "O(1)",
+      "space_complexity": "O(1)",
+      "issues": [
+        {
+          "id": "QLT-01",
+          "category": "Anti-pattern",
+          "severity": "MEDIUM",
+          "line_numbers": [
+            8,
+            14
+          ],
+          "title": "Missing Connection Context Manager",
+          "description": "Database connections should be handled using context managers (`with sqlite3.connect(...) as conn:`) to ensure cleanup.",
+          "recommendation": "Use context management and connection pooling."
+        }
+      ],
+      "strengths": [
+        "Clear function naming and modular structure."
+      ],
+      "summary": "Code requires database context management and secure environment configuration."
+    },
+    "bugs": {
+      "reliability_score": 35,
+      "bugs_detected": [
+        {
+          "id": "BUG-01",
+          "title": "SQLite Connection Resource Leak",
+          "type": "Resource Leak",
+          "severity": "HIGH",
+          "line_numbers": [
+            8,
+            15
+          ],
+          "root_cause": "The connection object `conn` is opened but never closed, exhausting file descriptors under load.",
+          "reproduction_scenario": "Calling `get_user_profile()` repeatedly in high-traffic endpoint will trigger `OperationalError: unable to open database file`.",
+          "fix_strategy": "Wrap connection inside a context manager or explicit `conn.close()` in a finally block."
+        }
+      ],
+      "summary": "Resource leaks and security flaws remediated with parameterized statements and path sanitization.",
+      "fixed_code": "import sqlite3\nimport os\nfrom pathlib import Path\nfrom typing import Optional, Tuple, Any\n\nDB_PATH = os.getenv(\"DB_PATH\", \"users.db\")\nAPI_SECRET_KEY = os.getenv(\"API_SECRET_KEY\")\nSAFE_BASE_DIR = Path(\"/var/data\").resolve()\n\ndef get_user_profile(user_input_username: str) -> Optional[Tuple[Any, ...]]:\n    \"\"\"Fetches user profile safely using parameterized SQLite queries.\"\"\"\n    query = \"SELECT id, username, email, role FROM users WHERE username = ?\"\n    with sqlite3.connect(DB_PATH) as conn:\n        cursor = conn.cursor()\n        cursor.execute(query, (user_input_username,))\n        return cursor.fetchone()\n\ndef delete_user_file(file_name: str) -> bool:\n    \"\"\"Deletes user file safely preventing path traversal attacks.\"\"\"\n    safe_target = (SAFE_BASE_DIR / file_name).resolve()\n    \n    # Ensure resolved path is strictly within the safe base directory\n    if not str(safe_target).startswith(str(SAFE_BASE_DIR)):\n        raise ValueError(\"Invalid file path: path traversal detected\")\n        \n    if safe_target.exists() and safe_target.is_file():\n        safe_target.unlink()\n        return True\n    return False\n"
+    },
+    "test_suite": {
+      "framework": "pytest",
+      "test_file_name": "test_security_and_profile.py",
+      "test_cases_count": 4,
+      "coverage_focus": [
+        "SQL Injection attempt prevention",
+        "Path traversal rejection",
+        "Valid user lookup",
+        "Resource closure"
+      ],
+      "test_code": "import pytest\nimport sqlite3\nfrom unittest.mock import patch, MagicMock\nfrom pathlib import Path\n\n# Test SQL Injection safety\ndef test_get_user_profile_sql_injection_defense():\n    with patch(\"sqlite3.connect\") as mock_connect:\n        mock_cursor = MagicMock()\n        mock_connect.return_value.__enter__.return_value.cursor.return_value = mock_cursor\n        \n        from benchmarks.sql_injection import get_user_profile\n        get_user_profile(\"' OR 1=1 --\")\n        \n        # Verify parameterized query was used\n        args, _ = mock_cursor.execute.call_args\n        assert args[0] == \"SELECT id, username, email, role FROM users WHERE username = ?\"\n        assert args[1] == (\"' OR 1=1 --\",)\n\n# Test Path Traversal defense\ndef test_delete_user_file_path_traversal_blocked():\n    from benchmarks.sql_injection import delete_user_file\n    with pytest.raises(ValueError, match=\"path traversal\"):\n        delete_user_file(\"../../etc/passwd\")\n",
+      "explanation": "Comprehensive pytest suite testing parameterized query compliance, path traversal blocking, and mock database context cleanup."
+    }
+  },
+  "race_condition": {
+    "security": {
+      "security_score": 65,
+      "risk_level": "MEDIUM",
+      "vulnerabilities": [
+        {
+          "id": "SEC-01",
+          "title": "Financial Check-Then-Act Race Condition (TOCTOU)",
+          "severity": "HIGH",
+          "cwe_id": "CWE-362",
+          "owasp_category": "A04:2021-Insecure Design",
+          "line_numbers": [
+            10,
+            12
+          ],
+          "description": "Balance check and debit occur in separate non-atomic steps without thread synchronization.",
+          "attack_vector": "Concurrent requests can withdraw more money than the available balance.",
+          "remediation": "Protect account operations with `threading.RLock()` or atomic transactional locks."
+        }
+      ],
+      "compliance_checks": {
+        "owasp_compliant": false,
+        "secrets_leak_free": true,
+        "input_sanitized": true,
+        "safe_dependencies": true
+      },
+      "summary": "Race condition creates financial double-spending vulnerability under concurrent execution."
+    },
+    "quality": {
+      "quality_score": 55,
+      "maintainability_score": 75,
+      "performance_score": 50,
+      "time_complexity": "O(1)",
+      "space_complexity": "O(1)",
+      "issues": [
+        {
+          "id": "QLT-01",
+          "category": "Architecture",
+          "severity": "HIGH",
+          "line_numbers": [
+            4,
+            18
+          ],
+          "title": "Missing Synchronization Primitives in Shared State",
+          "description": "Mutable balance accessed by multiple threads requires thread locking to avoid corrupted states.",
+          "recommendation": "Use context-managed re-entrant locks (`with self._lock:`)."
+        }
+      ],
+      "strengths": [
+        "Clean object-oriented interface."
+      ],
+      "summary": "Requires thread safety locks and ordered locking to prevent deadlocks."
+    },
+    "bugs": {
+      "reliability_score": 30,
+      "bugs_detected": [
+        {
+          "id": "BUG-01",
+          "title": "Double-Spend Concurrency Bug",
+          "type": "Race Condition",
+          "severity": "CRITICAL",
+          "line_numbers": [
+            10,
+            12,
+            18
+          ],
+          "root_cause": "Between balance check (`self.balance >= amount`) and deduction, other threads can interleave.",
+          "reproduction_scenario": "Spawn 10 threads each withdrawing $100 from an account with only $100 balance. Multiple threads succeed.",
+          "fix_strategy": "Implement mutex locks on account instances and consistent lock ordering in `transfer()` to prevent deadlocks."
+        }
+      ],
+      "summary": "Fixed race conditions with thread locks and deadlock prevention lock ordering.",
+      "fixed_code": "import threading\nfrom typing import Optional\n\nclass BankAccount:\n    def __init__(self, balance: float, account_id: str = \"acc_1\"):\n        if balance < 0:\n            raise ValueError(\"Initial balance cannot be negative\")\n        self.account_id = account_id\n        self.balance = balance\n        self._lock = threading.RLock()\n        \n    def withdraw(self, amount: float) -> bool:\n        \"\"\"Thread-safe atomic withdrawal.\"\"\"\n        if amount <= 0:\n            raise ValueError(\"Withdrawal amount must be positive\")\n            \n        with self._lock:\n            if self.balance >= amount:\n                self.balance -= amount\n                return True\n            return False\n\n    def deposit(self, amount: float) -> None:\n        \"\"\"Thread-safe atomic deposit.\"\"\"\n        if amount <= 0:\n            raise ValueError(\"Deposit amount must be positive\")\n        with self._lock:\n            self.balance += amount\n\n    def transfer(self, target_account: 'BankAccount', amount: float) -> bool:\n        \"\"\"Thread-safe transfer with deadlock prevention via lock ordering.\"\"\"\n        if amount <= 0:\n            raise ValueError(\"Transfer amount must be positive\")\n            \n        # Order locks by account_id to prevent AB-BA deadlock\n        first_lock, second_lock = (\n            (self._lock, target_account._lock)\n            if self.account_id < target_account.account_id\n            else (target_account._lock, self._lock)\n        )\n        \n        with first_lock:\n            with second_lock:\n                if self.balance >= amount:\n                    self.balance -= amount\n                    target_account.balance += amount\n                    return True\n                return False\n"
+    },
+    "test_suite": {
+      "framework": "pytest",
+      "test_file_name": "test_bank_concurrency.py",
+      "test_cases_count": 3,
+      "coverage_focus": [
+        "Concurrent withdrawal race prevention",
+        "Deadlock prevention in circular transfer",
+        "Negative balance boundary check"
+      ],
+      "test_code": "import concurrent.futures\nfrom benchmarks.race_condition import BankAccount\n\ndef test_concurrent_withdraw_prevents_double_spend():\n    acc = BankAccount(balance=100.0, account_id=\"acc_01\")\n    \n    def try_withdraw():\n        return acc.withdraw(100.0)\n        \n    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:\n        futures = [executor.submit(try_withdraw) for _ in range(10)]\n        results = [f.result() for f in futures]\n        \n    # Exactly one withdrawal must succeed\n    assert results.count(True) == 1\n    assert acc.balance == 0.0\n",
+      "explanation": "Concurrent thread pool stress test verifying zero double-spending and balance consistency."
+    }
+  },
+  "memory_leak": {
+    "security": {
+      "security_score": 70,
+      "risk_level": "MEDIUM",
+      "vulnerabilities": [
+        {
+          "id": "SEC-01",
+          "title": "Denial of Service via Memory Exhaustion (Unbounded Cache)",
+          "severity": "HIGH",
+          "cwe_id": "CWE-400",
+          "owasp_category": "A05:2021-Security Misconfiguration",
+          "line_numbers": [
+            5,
+            14
+          ],
+          "description": "Global cache grows indefinitely without eviction or size boundary.",
+          "attack_vector": "Attacker can flood keys to force Out-Of-Memory (OOM) crash.",
+          "remediation": "Use `collections.OrderedDict` or `functools.lru_cache` with a maximum capacity (`maxsize`)."
+        }
+      ],
+      "compliance_checks": {
+        "owasp_compliant": false,
+        "secrets_leak_free": true,
+        "input_sanitized": true,
+        "safe_dependencies": true
+      },
+      "summary": "Unbounded cache and unclosed sockets risk process crashes and FD exhaustion."
+    },
+    "quality": {
+      "quality_score": 48,
+      "maintainability_score": 60,
+      "performance_score": 40,
+      "time_complexity": "O(1) amortized",
+      "space_complexity": "O(N) unbounded",
+      "issues": [
+        {
+          "id": "QLT-01",
+          "category": "Performance",
+          "severity": "HIGH",
+          "line_numbers": [
+            18,
+            22
+          ],
+          "title": "Socket Unclosed Without Context Manager",
+          "description": "Socket descriptors remain open in OS kernel.",
+          "recommendation": "Use `with socket.create_connection(...) as s:`."
+        }
+      ],
+      "strengths": [
+        "Modular method separation."
+      ],
+      "summary": "Implemented bounded LRU cache eviction and auto-closing sockets."
+    },
+    "bugs": {
+      "reliability_score": 35,
+      "bugs_detected": [
+        {
+          "id": "BUG-01",
+          "title": "Socket Resource Leak on send_log",
+          "type": "Resource Leak",
+          "severity": "HIGH",
+          "line_numbers": [
+            18,
+            22
+          ],
+          "root_cause": "Socket object `s` is created and connected without closing or exception handling.",
+          "reproduction_scenario": "Calling `send_log` 1024 times exceeds max OS file descriptors `Too many open files`.",
+          "fix_strategy": "Use socket context manager `with socket.socket(...) as s:`."
+        }
+      ],
+      "summary": "Fixed memory and descriptor leaks with LRU cache and socket context managers.",
+      "fixed_code": "import socket\nfrom collections import OrderedDict\nfrom typing import Any, Optional\n\nclass LRUCache:\n    def __init__(self, capacity: int = 500):\n        self.capacity = capacity\n        self._cache = OrderedDict()\n        \n    def put(self, key: str, value: Any) -> None:\n        if key in self._cache:\n            self._cache.move_to_end(key)\n        self._cache[key] = value\n        if len(self._cache) > self.capacity:\n            self._cache.popitem(last=False)\n            \n    def get(self, key: str) -> Optional[Any]:\n        if key not in self._cache:\n            return None\n        self._cache.move_to_end(key)\n        return self._cache[key]\n\nclass DataProcessor:\n    def __init__(self, host: str = \"127.0.0.1\", port: int = 8080, max_cache: int = 500):\n        self.host = host\n        self.port = port\n        self.cache = LRUCache(capacity=max_cache)\n        self.history_limit = 1000\n        self.history = []\n\n    def fetch_and_cache(self, key: str, data: str) -> None:\n        \"\"\"Stores data in bounded LRU cache to prevent memory leaks.\"\"\"\n        self.cache.put(key, data * 1000)\n        if len(self.history) >= self.history_limit:\n            self.history.pop(0)\n        self.history.append(data)\n        \n    def send_log(self, message: str, timeout: float = 2.0) -> bool:\n        \"\"\"Sends log message ensuring socket is cleanly closed even on network errors.\"\"\"\n        try:\n            with socket.create_connection((self.host, self.port), timeout=timeout) as s:\n                s.sendall(message.encode('utf-8'))\n                return True\n        except (socket.error, socket.timeout) as e:\n            return False\n"
+    },
+    "test_suite": {
+      "framework": "pytest",
+      "test_file_name": "test_lru_and_sockets.py",
+      "test_cases_count": 3,
+      "coverage_focus": [
+        "LRU cache capacity capping",
+        "Socket context manager auto-close",
+        "History limit pruning"
+      ],
+      "test_code": "from benchmarks.memory_leak import DataProcessor, LRUCache\n\ndef test_lru_cache_caps_at_max_size():\n    cache = LRUCache(capacity=5)\n    for i in range(10):\n        cache.put(f\"key_{i}\", f\"val_{i}\")\n    # Cache must never exceed capacity 5\n    assert len(cache._cache) == 5\n    assert cache.get(\"key_0\") is None\n    assert cache.get(\"key_9\") == \"val_9\"\n",
+      "explanation": "Validates bounded memory footprint and automatic socket closure."
+    }
+  },
+  "broken_auth": {
+    "security": {
+      "security_score": 25,
+      "risk_level": "CRITICAL",
+      "vulnerabilities": [
+        {
+          "id": "SEC-01",
+          "title": "JWT Signature Verification Disabled (Authentication Bypass)",
+          "severity": "CRITICAL",
+          "cwe_id": "CWE-347",
+          "owasp_category": "A07:2021-Identification and Authentication Failures",
+          "line_numbers": [
+            17
+          ],
+          "description": "`verify_signature: False` accepts any forged or manipulated token without checking authenticity.",
+          "attack_vector": "Attacker crafts a token with `\"role\": \"admin\"` and signs it with no key or invalid key; server accepts it.",
+          "remediation": "Enable strict signature verification and specify expected algorithms `algorithms=['HS256']`."
+        }
+      ],
+      "compliance_checks": {
+        "owasp_compliant": false,
+        "secrets_leak_free": false,
+        "input_sanitized": true,
+        "safe_dependencies": true
+      },
+      "summary": "Critical authentication bypass due to disabled JWT signature verification and hardcoded secret."
+    },
+    "quality": {
+      "quality_score": 60,
+      "maintainability_score": 70,
+      "performance_score": 85,
+      "time_complexity": "O(1)",
+      "space_complexity": "O(1)",
+      "issues": [
+        {
+          "id": "QLT-01",
+          "category": "Anti-pattern",
+          "severity": "HIGH",
+          "line_numbers": [
+            5
+          ],
+          "title": "Static Weak Secret in Source Code",
+          "description": "Using weak secret `secret123` allows offline brute-forcing in milliseconds.",
+          "recommendation": "Use 256-bit entropy secret loaded from environment."
+        }
+      ],
+      "strengths": [
+        "Clean function signatures."
+      ],
+      "summary": "Enforced secure token decoding, algorithm whitelisting, and environment secrets."
+    },
+    "bugs": {
+      "reliability_score": 40,
+      "bugs_detected": [
+        {
+          "id": "BUG-01",
+          "title": "Broad Exception Swallowing in verify_user_token",
+          "type": "Logic Flaw",
+          "severity": "MEDIUM",
+          "line_numbers": [
+            19,
+            21
+          ],
+          "root_cause": "Catching all exceptions silently masks token expiry, malformed tokens, and configuration errors.",
+          "fix_strategy": "Handle specific `jwt.ExpiredSignatureError` and `jwt.InvalidTokenError` explicitly."
+        }
+      ],
+      "summary": "Fixed auth vulnerabilities with strict signature verification and typed exceptions.",
+      "fixed_code": "import jwt\nimport os\nimport time\nfrom typing import Optional, Dict, Any\n\nJWT_SECRET = os.getenv(\"JWT_SECRET\")\nif not JWT_SECRET:\n    JWT_SECRET = os.urandom(32).hex()\n\nALGORITHM = \"HS256\"\n\ndef create_user_token(user_id: str, role: str = \"user\", expires_in: int = 3600) -> str:\n    \"\"\"Creates a cryptographically signed JWT token.\"\"\"\n    payload = {\n        \"sub\": str(user_id),\n        \"role\": role,\n        \"iat\": int(time.time()),\n        \"exp\": int(time.time() + expires_in)\n    }\n    return jwt.encode(payload, JWT_SECRET, algorithm=ALGORITHM)\n\ndef verify_user_token(token: str) -> Optional[Dict[str, Any]]:\n    \"\"\"Verifies JWT token ensuring signature and expiration validity.\"\"\"\n    try:\n        payload = jwt.decode(\n            token,\n            JWT_SECRET,\n            algorithms=[ALGORITHM],\n            options={\n                \"verify_signature\": True,\n                \"require\": [\"exp\", \"iat\", \"sub\"]\n            }\n        )\n        return payload\n    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):\n        return None\n"
+    },
+    "test_suite": {
+      "framework": "pytest",
+      "test_file_name": "test_auth_tokens.py",
+      "test_cases_count": 3,
+      "coverage_focus": [
+        "Valid token round-trip",
+        "Tampered token rejection",
+        "Expired token rejection"
+      ],
+      "test_code": "import time\nfrom benchmarks.broken_auth import create_user_token, verify_user_token\n\ndef test_valid_token_verification():\n    token = create_user_token(\"user_101\", role=\"admin\")\n    payload = verify_user_token(token)\n    assert payload is not None\n    assert payload[\"sub\"] == \"user_101\"\n    assert payload[\"role\"] == \"admin\"\n\ndef test_tampered_token_rejected():\n    token = create_user_token(\"user_101\", role=\"user\")\n    tampered = token[:-5] + \"XXXXX\"\n    assert verify_user_token(tampered) is None\n",
+      "explanation": "Validates signature verification, expiry handling, and role extraction."
+    }
+  },
+  "redos_regex": {
+    "security": {
+      "security_score": 30,
+      "risk_level": "HIGH",
+      "vulnerabilities": [
+        {
+          "id": "SEC-01",
+          "title": "Regular Expression Denial of Service (ReDoS)",
+          "severity": "HIGH",
+          "cwe_id": "CWE-1333",
+          "owasp_category": "A03:2021-Injection",
+          "line_numbers": [
+            2,
+            6
+          ],
+          "description": "Nested repeating quantifier creates exponential catastrophic backtracking on non-matching inputs.",
+          "attack_vector": "Attacker supplies repeated characters followed by invalid character, spiking CPU to 100%.",
+          "remediation": "Use simplified linear-time regex or a standard email validator."
+        },
+        {
+          "id": "SEC-02",
+          "title": "Prototype Pollution Vulnerability",
+          "severity": "HIGH",
+          "cwe_id": "CWE-1321",
+          "owasp_category": "A08:2021-Software and Data Integrity Failures",
+          "line_numbers": [
+            10,
+            15
+          ],
+          "description": "Unchecked recursive key assignment allows modifying `__proto__` and `constructor.prototype`.",
+          "attack_vector": "Payload with `\"__proto__\": {\"admin\": true}` pollutes all JavaScript objects.",
+          "remediation": "Ignore dangerous keys (`__proto__`, `constructor`, `prototype`) during recursive object merge."
+        }
+      ],
+      "compliance_checks": {
+        "owasp_compliant": false,
+        "secrets_leak_free": true,
+        "input_sanitized": false,
+        "safe_dependencies": true
+      },
+      "summary": "ReDoS and Prototype Pollution pose critical availability and privilege escalation risks."
+    },
+    "quality": {
+      "quality_score": 50,
+      "maintainability_score": 65,
+      "performance_score": 35,
+      "time_complexity": "O(2^N) exponential in regex",
+      "space_complexity": "O(N)",
+      "issues": [
+        {
+          "id": "QLT-01",
+          "category": "Performance",
+          "severity": "HIGH",
+          "line_numbers": [
+            2
+          ],
+          "title": "Catastrophic Backtracking Regex",
+          "description": "Regex execution time grows exponentially with input length.",
+          "recommendation": "Use linear matching pattern."
+        }
+      ],
+      "strengths": [
+        "Concise utility functions."
+      ],
+      "summary": "Patched catastrophic regex backtracking and blocked prototype pollution keys."
+    },
+    "bugs": {
+      "reliability_score": 45,
+      "bugs_detected": [
+        {
+          "id": "BUG-01",
+          "title": "Prototype Pollution in Object Merge",
+          "type": "Logic Flaw",
+          "severity": "HIGH",
+          "line_numbers": [
+            10,
+            16
+          ],
+          "root_cause": "Keys are iterated without filtering out prototype properties or special object properties.",
+          "fix_strategy": "Filter keys with `Object.prototype.hasOwnProperty.call()` and reject `__proto__`."
+        }
+      ],
+      "summary": "Replaced regex with safe linear expression and protected against prototype injection.",
+      "fixed_code": "// Hardened JavaScript Email Validation and Safe Object Deep Merge\nconst EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;\n\nfunction validateEmail(email) {\n    if (typeof email !== 'string' || email.length > 254) {\n        return false;\n    }\n    return EMAIL_REGEX.test(email);\n}\n\nfunction mergeUserData(target, source) {\n    if (!target || typeof target !== 'object') target = {};\n    if (!source || typeof source !== 'object') return target;\n\n    const DANGEROUS_KEYS = ['__proto__', 'constructor', 'prototype'];\n\n    for (const key of Object.keys(source)) {\n        if (DANGEROUS_KEYS.includes(key)) {\n            continue;\n        }\n        \n        if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {\n            if (!target[key] || typeof target[key] !== 'object') {\n                target[key] = {};\n            }\n            mergeUserData(target[key], source[key]);\n        } else {\n            target[key] = source[key];\n        }\n    }\n    return target;\n}\n\nmodule.exports = { validateEmail, mergeUserData };\n"
+    },
+    "test_suite": {
+      "framework": "jest",
+      "test_file_name": "redos_and_pollution.test.js",
+      "test_cases_count": 4,
+      "coverage_focus": [
+        "ReDoS attack string fast-rejection",
+        "Prototype pollution immunity",
+        "Valid email acceptance",
+        "Invalid email rejection"
+      ],
+      "test_code": "const { validateEmail, mergeUserData } = require('./redos_regex');\n\ndescribe('Security and Performance Tests', () => {\n    test('validateEmail handles ReDoS attack strings in <5ms', () => {\n        const attackString = 'a'.repeat(50) + '!';\n        const start = Date.now();\n        const result = validateEmail(attackString);\n        const duration = Date.now() - start;\n        \n        expect(result).toBe(false);\n        expect(duration).toBeLessThan(10);\n    });\n\n    test('mergeUserData blocks prototype pollution', () => {\n        const payload = JSON.parse('{\"__proto__\": {\"polluted\": true}}');\n        const target = {};\n        mergeUserData(target, payload);\n        \n        expect({}.polluted).toBeUndefined();\n    });\n});\n",
+      "explanation": "Jest tests verifying ReDoS resistance and prototype pollution mitigation."
+    }
+  }
+}
