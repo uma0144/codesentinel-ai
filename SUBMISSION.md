@@ -7,8 +7,7 @@
 ---
 
 ## 1. GitHub Repository Link
-- **Repository URL:** `https://github.com/<YOUR_GITHUB_USERNAME>/codesentinel-ai`  
-*(Please replace `<YOUR_GITHUB_USERNAME>` with your GitHub handle after pushing the repo)*
+- **Repository URL:** `https://github.com/uma0144/codesentinel-ai`
 
 ---
 
